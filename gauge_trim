@@ -1,0 +1,95 @@
+
+import os, glob, sys, subprocess
+import yaml
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+import re
+import pickle
+import shutil
+from pathlib import Path
+sys.path.append('/user/cbm/python_package/SALT/package')
+
+#To prevent the ON/OFF is interpreated to true/false in yaml load
+sys.path.append('/user/dw1409kang/Python/myModule/SALT/Yaml') 
+from Loader import load_yaml_raw 
+
+
+cal_gauge_df = pd.read_csv('./gauge.txt', delim_whitespace=True, keep_default_na=False)
+
+#cal_gauge_df["center_x"] = cal_gauge_df["startx"] + (cal_gauge_df["startx"] + cal_gauge_df["endx"])/2
+#cal_gauge_df["center_y"] = cal_gauge_df["starty"] + (cal_gauge_df["starty"] + cal_gauge_df["endy"])/2
+cal_gauge_df["center_x"] = cal_gauge_df[['startx', 'endx']].mean(axis=1)
+cal_gauge_df["center_y"] = cal_gauge_df[['starty', 'endy']].mean(axis=1)
+
+
+# add HV
+cal_gauge_df['HV'] = ''
+cal_gauge_df['HV'] = np.where(cal_gauge_df['starty']==cal_gauge_df['endy'],'H',np.where(cal_gauge_df['startx']==cal_gauge_df['endx'],'V','Diag'))
+
+#print out test cal_gauge
+#cal_gauge_df.to_csv('center.txt', index=0 , sep=' ') 
+
+
+# 1. original guage
+# 2. symmetric wafer_cd 10-200 % manipulated gauge 
+# 2-1. left only
+# 2.2. right only
+stretching_ratio = [0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 4.0, 6.0, 8.0, 10.0, 20.0]
+
+#mkdir(gauge_stretcher,exist_ok=True)
+
+
+
+for i,j in enumerate(stretching_ratio):
+
+    sub_dir = gauge_stretcher/str('wfcd_' + str(j))
+    sub_dir.mkdir(exist_ok=True)
+    print('wfcd_', j, ' is created')
+
+    sub_conf = sub_dir / 'conf_gauge_stretch.yaml'
+    sub_gauge = sub_dir / str('gauge_wfcd_' + str(j) + '.txt')
+    configuration['Configuration']['Gaugefile'] = str(sub_gauge)
+
+    sub_conf.touch(exist_ok=True)
+    with open(sub_conf, 'w') as f:
+        yaml.dump(configuration, f)
+
+    gauge_df = cal_gauge_df.copy(deep=True)
+
+#    cal_gauge_df_copy.mask(cal_gauge_df_copy['HV']==H, cal_gauge_df_copy['startx']=cal_gauge_df_copy['wafercd']*j*0.5, inplace=True)
+    gauge_df.loc[gauge_df["HV"]=="H","startx"] = gauge_df["center_x"] - gauge_df["wafercd"]*0.5*j
+    gauge_df.loc[gauge_df["HV"]=="H","endx"] = gauge_df["center_x"] + gauge_df["wafercd"]*0.5*j
+    gauge_df.loc[gauge_df["HV"]=="V","starty"] = gauge_df["center_y"] - gauge_df["wafercd"]*0.5*j
+    gauge_df.loc[gauge_df["HV"]=="V","endy"] = gauge_df["center_y"] + gauge_df["wafercd"]*0.5*j
+
+
+    #cal_gauge copy and dump
+#    sub_gauge = sub_dir / str('gauge_wfcd_' + str(j) + '.txt') 
+
+    gauge_df.to_csv(sub_gauge, index=0 , sep=' ') 
+
+    shutil.copy('/user/cbm/python_package/SALT/package/run_scripts/run_for_gauge_stretcher.sh', sub_dir / 'run.sh')
+
+
+
+
+
+
+
+#make RUN.sh
+with open(gauge_stretcher / 'RUN.sh', 'w') as f:
+    f.write("#!/bin/bash\n")
+    for a,b in enumerate(gauge_stretcher.iterdir()):
+       if b.is_dir():
+           f.write("cd ")
+           f.write(str(b))
+           f.write("\n")
+           f.write("./run.sh\n")
+           #f.write("cd ../\n")
+       else:
+           pass
+os.chmod('./model_analysis/gauge_stretcher/RUN.sh', 0o755)
+
+#cal_gauge_df_copy.loc[0, 'wafercd']
